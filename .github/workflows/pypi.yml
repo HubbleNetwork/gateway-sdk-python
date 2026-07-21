@@ -63,7 +63,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     environment:
       name: pypi
-      url: https://pypi.org/p/hubble-gateway
+      url: https://pypi.org/p/hubble-gateway-sdk-python
     permissions:
       id-token: write
     steps:
