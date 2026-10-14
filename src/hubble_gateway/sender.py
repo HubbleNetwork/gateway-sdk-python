@@ -43,9 +43,9 @@ class GatewaySender:
     ) -> None:
         self._auth = auth
         self._get_location = get_location
-        self._batch_size = batch_size
-        self._upload_interval = upload_interval_s
-        self._dedup_window = dedup_window_s
+        self._local_batch_size = batch_size
+        self._local_upload_interval_s = upload_interval_s
+        self._local_dedup_window_s = dedup_window_s
         self._dedup_map: dict[tuple[str, str | None, str], _DedupEntry] = {}
         self._dedup_lock = asyncio.Lock()
         self._running = False
@@ -56,16 +56,15 @@ class GatewaySender:
 
     async def start(self) -> None:
         self._running = True
-        self._apply_server_config()
         asyncio.create_task(self._upload_loop())
         if self._get_location:
             asyncio.create_task(self._location_loop())
         logger.info(
             "Sender started",
             gateway_id=self._auth.gateway_id,
-            upload_interval=self._upload_interval,
-            dedup_window=self._dedup_window,
-            batch_size=self._batch_size,
+            upload_interval=self.upload_interval_s,
+            dedup_window=self.dedup_window_s,
+            batch_size=self.batch_size,
         )
 
     async def stop(self) -> None:
@@ -86,10 +85,27 @@ class GatewaySender:
         existing = self._dedup_map.get(key)
         if existing is not None:
             age_ms = int(packet.timestamp.timestamp() * 1000) - existing.first_seen_ms
-            if age_ms < self._dedup_window * 1000:
+            if age_ms < self.dedup_window_s * 1000:
                 existing.merge(packet)
                 return
         self._dedup_map[key] = _DedupEntry(packet)
+
+    # Read the auth's server config on every use rather than caching it, so a
+    # new config from any registration, heartbeat or token refresh applies at
+    # once, and a cleared config falls back to the local values.
+    @property
+    def batch_size(self) -> int:
+        return self._auth.server_config.get("uploadBatchSize", self._local_batch_size)
+
+    @property
+    def upload_interval_s(self) -> float:
+        ms = self._auth.server_config.get("uploadIntervalMs")
+        return self._local_upload_interval_s if ms is None else ms / 1000
+
+    @property
+    def dedup_window_s(self) -> float:
+        ms = self._auth.server_config.get("dedupWindowMs")
+        return self._local_dedup_window_s if ms is None else ms / 1000
 
     @property
     def stats(self) -> dict[str, int]:
@@ -103,7 +119,7 @@ class GatewaySender:
 
     async def _upload_loop(self) -> None:
         while self._running:
-            await asyncio.sleep(self._upload_interval)
+            await asyncio.sleep(self.upload_interval_s)
             if not self._dedup_map:
                 continue
             await self._flush()
@@ -135,8 +151,9 @@ class GatewaySender:
             except Exception as e:
                 logger.warning("Failed to get location", error=str(e))
 
-        for i in range(0, len(entries), self._batch_size):
-            batch = entries[i : i + self._batch_size]
+        batch_size = self.batch_size
+        for i in range(0, len(entries), batch_size):
+            batch = entries[i : i + batch_size]
             await self._upload_batch(batch, location)
 
     async def _upload_batch(self, entries: list[_DedupEntry], location: Location) -> None:
@@ -193,10 +210,3 @@ class GatewaySender:
             )
         except Exception as e:
             logger.warning("Location upload failed", error=str(e))
-
-    def _apply_server_config(self) -> None:
-        cfg = self._auth.server_config
-        if "uploadBatchSize" in cfg:
-            self._batch_size = min(int(cfg["uploadBatchSize"]), 500)
-        if "uploadIntervalMs" in cfg:
-            self._upload_interval = max(int(cfg["uploadIntervalMs"]) / 1000, 1)

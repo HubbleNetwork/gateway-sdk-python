@@ -53,15 +53,15 @@ class Settings(BaseSettings):
     # Batching and deduplication
     batch_size: int = Field(
         default=500,
-        description="Max packets per upload batch",
+        description="Max packets per upload batch (server uploadBatchSize overrides)",
     )
     upload_interval_seconds: float = Field(
         default=5.0,
-        description="Seconds between upload flushes",
+        description="Seconds between upload flushes (server uploadIntervalMs overrides)",
     )
     dedup_window_seconds: float = Field(
         default=300.0,
-        description="Deduplication window in seconds",
+        description="Deduplication window in seconds (server dedupWindowMs overrides)",
     )
 
     # Location
