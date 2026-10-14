@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from hubble_gateway.auth import GatewayAuth, sanitize_server_config
+from hubble_gateway.config import Settings
 from hubble_gateway.models import BLEPacket
 from hubble_gateway.sender import GatewaySender
 
@@ -199,10 +200,74 @@ async def test_sender_applies_dedup_window(auth, server):
     sender.add_packet(_packet("AA", t0))
     sender.add_packet(_packet("AA", t0 + timedelta(seconds=30)))
     assert sender.stats["buffer_size"] == 1
-    assert next(iter(sender._dedup_map.values())).sighting_count == 2
+    assert sender._pending[0].sighting_count == 2
 
     sender.add_packet(_packet("AA", t0 + timedelta(seconds=61)))
-    assert next(iter(sender._dedup_map.values())).sighting_count == 1
+    assert sender.stats["buffer_size"] == 2
+
+
+def _capture_uploads(auth, server) -> list[list[str]]:
+    uploads: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/packets"):
+            packets = json.loads(request.content)["packets"]
+            uploads.append([p["deviceAddress"] for p in packets])
+            return httpx.Response(202)
+        return server.handler(request)
+
+    auth._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return uploads
+
+
+async def test_duplicate_dropped_across_flush(auth, server):
+    server.register_config = {"dedupWindowMs": 60_000}
+    assert await auth.ensure_authenticated()
+    uploads = _capture_uploads(auth, server)
+    sender = GatewaySender(auth)
+
+    t0 = datetime.now(timezone.utc)
+    sender.add_packet(_packet("AA", t0))
+    await sender._flush()
+    assert uploads == [["AA"]]
+
+    sender.add_packet(_packet("AA", t0 + timedelta(seconds=30)))
+    assert sender.stats["buffer_size"] == 0
+    assert sender.stats["dropped_duplicates"] == 1
+    await sender._flush()
+    assert uploads == [["AA"]]
+
+    sender.add_packet(_packet("AA", t0 + timedelta(seconds=61)))
+    await sender._flush()
+    assert uploads == [["AA"], ["AA"]]
+
+
+async def test_dedup_keys_expire_by_age(auth):
+    sender = GatewaySender(auth, dedup_window_s=10.0)
+    t0 = datetime.now(timezone.utc)
+    for addr in ("A1", "A2", "A3"):
+        sender.add_packet(_packet(addr, t0))
+    assert sender.stats["dedup_keys"] == 3
+
+    sender.add_packet(_packet("B1", t0 + timedelta(seconds=11)))
+    assert sender.stats["dedup_keys"] == 1
+
+
+async def test_dedup_keys_capped(auth, monkeypatch):
+    monkeypatch.setattr("hubble_gateway.sender.MAX_DEDUP_KEYS", 3)
+    sender = GatewaySender(auth, dedup_window_s=600.0)
+    t0 = datetime.now(timezone.utc)
+    for addr in ("A1", "A2", "A3", "A4", "A5"):
+        sender.add_packet(_packet(addr, t0))
+    assert sender.stats["dedup_keys"] == 3
+    assert list(sender._window_start_ms) == [("A3", "FCA6", "01"), ("A4", "FCA6", "01"),
+                                             ("A5", "FCA6", "01")]
+
+
+def test_default_upload_interval_is_60s(auth, monkeypatch):
+    monkeypatch.delenv("HUBBLE_UPLOAD_INTERVAL_SECONDS", raising=False)
+    assert Settings(_env_file=None).upload_interval_seconds == 60.0
+    assert GatewaySender(auth).upload_interval_s == 60.0
 
 
 async def test_sender_flush_uses_server_batch_size(auth, server):

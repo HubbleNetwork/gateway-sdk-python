@@ -13,15 +13,21 @@ from hubble_gateway.models import BLEPacket, Location
 
 logger = structlog.get_logger(__name__)
 
+_DedupKey = tuple[str, str | None, str]
+
+# Hard cap on remembered dedup keys. Age-based expiry normally keeps the map
+# far smaller; the cap only bounds memory if a flood of distinct keys arrives
+# inside one window.
+MAX_DEDUP_KEYS = 100_000
+
 
 class _DedupEntry:
-    __slots__ = ("packet", "strongest_rssi", "sighting_count", "first_seen_ms")
+    __slots__ = ("packet", "strongest_rssi", "sighting_count")
 
     def __init__(self, packet: BLEPacket) -> None:
         self.packet = packet
         self.strongest_rssi = packet.rssi
         self.sighting_count = 1
-        self.first_seen_ms = int(packet.timestamp.timestamp() * 1000)
 
     def merge(self, packet: BLEPacket) -> None:
         self.sighting_count += 1
@@ -38,7 +44,7 @@ class GatewaySender:
         auth: GatewayAuth,
         get_location: Callable[[], Awaitable[Location]] | None = None,
         batch_size: int = 500,
-        upload_interval_s: float = 5.0,
+        upload_interval_s: float = 60.0,
         dedup_window_s: float = 300.0,
     ) -> None:
         self._auth = auth
@@ -46,12 +52,20 @@ class GatewaySender:
         self._local_batch_size = batch_size
         self._local_upload_interval_s = upload_interval_s
         self._local_dedup_window_s = dedup_window_s
-        self._dedup_map: dict[tuple[str, str | None, str], _DedupEntry] = {}
+        # Sightings waiting for the next upload.
+        self._pending: list[_DedupEntry] = []
+        # Pending entry per key for the window it opened, so in-window repeats
+        # before the upload add to its sighting count.
+        self._open: dict[_DedupKey, _DedupEntry] = {}
+        # When each key last opened a window. Survives uploads; kept in
+        # ascending time order so expiry and the cap pop from the front.
+        self._window_start_ms: dict[_DedupKey, int] = {}
         self._dedup_lock = asyncio.Lock()
         self._running = False
         self._stats_sends = 0
         self._stats_total = 0
         self._stats_uploaded = 0
+        self._stats_dropped = 0
         self._stats_devices: set[str] = set()
 
     async def start(self) -> None:
@@ -81,14 +95,38 @@ class GatewaySender:
     def add_packet(self, packet: BLEPacket) -> None:
         self._stats_total += 1
         self._stats_devices.add(packet.device_address)
-        key = (packet.device_address, packet.service_uuid_16bit, packet.service_data_hex)
-        existing = self._dedup_map.get(key)
-        if existing is not None:
-            age_ms = int(packet.timestamp.timestamp() * 1000) - existing.first_seen_ms
-            if age_ms < self.dedup_window_s * 1000:
-                existing.merge(packet)
-                return
-        self._dedup_map[key] = _DedupEntry(packet)
+        key: _DedupKey = (
+            packet.device_address, packet.service_uuid_16bit, packet.service_data_hex,
+        )
+        now_ms = int(packet.timestamp.timestamp() * 1000)
+        window_ms = self.dedup_window_s * 1000
+        self._expire_dedup_keys(now_ms, window_ms)
+
+        # The window is anchored at the sighting that opened it, not slid by
+        # repeats: a device that beacons nonstop is still reported once per
+        # window instead of never again.
+        start_ms = self._window_start_ms.get(key)
+        if start_ms is not None and now_ms - start_ms < window_ms:
+            entry = self._open.get(key)
+            if entry is not None:
+                entry.merge(packet)
+            else:
+                self._stats_dropped += 1
+            return
+
+        self._window_start_ms.pop(key, None)
+        self._window_start_ms[key] = now_ms
+        entry = _DedupEntry(packet)
+        self._pending.append(entry)
+        self._open[key] = entry
+
+    def _expire_dedup_keys(self, now_ms: int, window_ms: float) -> None:
+        starts = self._window_start_ms
+        while starts:
+            key = next(iter(starts))
+            if now_ms - starts[key] < window_ms and len(starts) < MAX_DEDUP_KEYS:
+                break
+            del starts[key]
 
     # Read the auth's server config on every use rather than caching it, so a
     # new config from any registration, heartbeat or token refresh applies at
@@ -114,13 +152,15 @@ class GatewaySender:
             "uploaded_packets": self._stats_uploaded,
             "sends": self._stats_sends,
             "unique_devices": len(self._stats_devices),
-            "buffer_size": len(self._dedup_map),
+            "dropped_duplicates": self._stats_dropped,
+            "buffer_size": len(self._pending),
+            "dedup_keys": len(self._window_start_ms),
         }
 
     async def _upload_loop(self) -> None:
         while self._running:
             await asyncio.sleep(self.upload_interval_s)
-            if not self._dedup_map:
+            if not self._pending:
                 continue
             await self._flush()
 
@@ -139,10 +179,11 @@ class GatewaySender:
 
     async def _flush(self) -> None:
         async with self._dedup_lock:
-            if not self._dedup_map:
+            if not self._pending:
                 return
-            entries = list(self._dedup_map.values())
-            self._dedup_map.clear()
+            entries = self._pending
+            self._pending = []
+            self._open.clear()
 
         location = Location()
         if self._get_location:
