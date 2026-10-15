@@ -12,6 +12,8 @@ import httpx
 import structlog
 
 from hubble_gateway import __version__
+from hubble_gateway.config import HUBBLE_SERVICE_UUID
+from hubble_gateway.models import normalize_service_uuid
 
 logger = structlog.get_logger(__name__)
 
@@ -20,23 +22,45 @@ _TOKEN_EXPIRY_MARGIN_S = 60
 # Server config keys this SDK applies, with the inclusive range gateway-api
 # allows for them. gateway-api may also send activeUploadIntervalMs,
 # activeDedupWindowMs and uploadOnCellular; Python has no motion state or
-# cellular gating, so those are dropped.
+# cellular gating, so those are dropped. scanServiceUuids is handled apart
+# because it is a list.
 SERVER_CONFIG_RANGES: dict[str, tuple[int, int]] = {
     "uploadIntervalMs": (60_000, 3_600_000),
     "uploadBatchSize": (1, 500),
     "dedupWindowMs": (5_000, 3_600_000),
 }
 
+MAX_SCAN_SERVICE_UUIDS = 16
 
-def sanitize_server_config(config: Any) -> dict[str, int]:
+
+def _sanitize_scan_service_uuids(value: Any) -> list[str] | None:
+    """Normalize a server scan list to uppercase 128-bit UUIDs, FCA6 first.
+
+    Invalid entries are dropped; FCA6 is always kept, as gateway-api does.
+    Returns None when the value is not a list, so the local setting applies.
+    """
+    if not isinstance(value, list):
+        return None
+    result = [HUBBLE_SERVICE_UUID]
+    for item in value:
+        u = normalize_service_uuid(item) if isinstance(item, str) else None
+        if u is not None and u not in result:
+            result.append(u)
+    return result[:MAX_SCAN_SERVICE_UUIDS]
+
+
+def sanitize_server_config(config: Any) -> dict[str, Any]:
     """Keep the keys this SDK uses, clamped to their ranges.
 
-    Values that are not finite numbers (null, strings, bools, NaN) are
-    dropped, so the local default applies for that key.
+    Values of the wrong type (null, strings, bools, NaN) are dropped, so the
+    local setting applies for that key.
     """
     if not isinstance(config, dict):
         return {}
-    result: dict[str, int] = {}
+    result: dict[str, Any] = {}
+    uuids = _sanitize_scan_service_uuids(config.get("scanServiceUuids"))
+    if uuids is not None:
+        result["scanServiceUuids"] = uuids
     for key, (low, high) in SERVER_CONFIG_RANGES.items():
         value = config.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)):

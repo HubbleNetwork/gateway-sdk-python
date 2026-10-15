@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     # BLE scanning
     service_uuids: list[str] = Field(
         default=DEFAULT_SERVICE_UUIDS,
-        description="BLE service UUIDs to scan for",
+        description=(
+            "BLE service UUIDs to scan for. Server scanServiceUuids replaces this "
+            "list when the Scanner is given auth."
+        ),
     )
     scan_duration_seconds: float = Field(
         default=5.0,

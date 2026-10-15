@@ -1,18 +1,49 @@
 """Data models for BLE packets and locations."""
 
 import base64
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+BLUETOOTH_BASE_UUID_SUFFIX = "-0000-1000-8000-00805F9B34FB"
+
+_UUID16_PATTERN = re.compile(r"^[0-9A-F]{4}$")
+_UUID128_PATTERN = re.compile(
+    r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$"
+)
+
+
+def normalize_service_uuid(value: str) -> str | None:
+    """Return the uppercase 128-bit form of a BLE service UUID, or None if invalid.
+
+    ``FCA6`` -> ``0000FCA6-0000-1000-8000-00805F9B34FB``. This is the form
+    bleak reports and filters on.
+    """
+    u = value.strip().upper()
+    if _UUID16_PATTERN.match(u):
+        return f"0000{u}{BLUETOOTH_BASE_UUID_SUFFIX}"
+    if _UUID128_PATTERN.match(u):
+        return u
+    return None
+
+
+def is_bluetooth_base_uuid(full_uuid: str) -> bool:
+    u = full_uuid.upper()
+    return len(u) == 36 and u.startswith("0000") and u.endswith(BLUETOOTH_BASE_UUID_SUFFIX)
+
 
 def uuid_to_16bit(full_uuid: str) -> str:
-    """Extract 16-bit short form from a full 128-bit BLE UUID.
+    """Short form of a BLE UUID, as the gateway-api packet schema expects.
 
-    ``0000FCA6-0000-1000-8000-00805F9B34FB`` -> ``FCA6``
+    ``0000FCA6-0000-1000-8000-00805F9B34FB`` -> ``FCA6``. A UUID that is not
+    on the Bluetooth Base UUID has no 16-bit form, so it is returned whole
+    (uppercase) rather than as a misleading slice.
     """
-    return full_uuid[4:8].upper()
+    if is_bluetooth_base_uuid(full_uuid):
+        return full_uuid[4:8].upper()
+    return full_uuid.upper()
 
 
 class Location(BaseModel):
@@ -89,7 +120,7 @@ class BLEPacket(BaseModel):
 
     @property
     def service_uuid_16bit(self) -> str | None:
-        """16-bit short form of matched UUID (e.g. 'FCA6')."""
+        """Short form of matched UUID (e.g. 'FCA6'); full form if not a Base UUID."""
         if self.service_uuid:
             return uuid_to_16bit(self.service_uuid)
         return None
