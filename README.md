@@ -6,25 +6,18 @@ Python SDK for building Hubble Network BLE gateways. Import `hubble_gateway` in 
 
 gateway-api sends a `config` object (or `null`) in the registration, heartbeat
 and token-refresh responses. `GatewayAuth` stores it as `server_config`.
-`GatewaySender` reads it on every use, and `Scanner(auth=...)` reads it before
-each scan cycle, so each new response takes effect without a restart.
+`GatewaySender` reads it on every use, so each new response takes effect
+without a restart.
 
 | Key | Range | Overrides |
 | --- | --- | --- |
 | `uploadIntervalMs` | 60,000 – 3,600,000 | `upload_interval_s` |
 | `uploadBatchSize` | 1 – 500 | `batch_size` |
 | `dedupWindowMs` | 5,000 – 3,600,000 | `dedup_window_s` |
-| `scanServiceUuids` | list, max 16 | `Scanner` `service_uuids` |
 
 - Each response replaces the stored config. It does not merge into it.
 - `config: null` clears it, and the local values apply again.
 - Out-of-range values are clamped. Values of the wrong type are ignored.
-- `scanServiceUuids` replaces the scan list. Only 16-bit services are valid:
-  the short form (`FCA6`) or its Bluetooth Base form
-  (`0000FCA6-0000-1000-8000-00805F9B34FB`). Custom 128-bit UUIDs are dropped,
-  because gateway-api keys packets on 16-bit service IDs. The SDK also drops
-  duplicates, keeps `FCA6` first, and keeps at most 16.
-  Server default: `["FCA6", "FEED"]`.
 - Uploaded packets carry the 16-bit form (`FCA6`) as `serviceUuid`.
 - Other keys (`activeUploadIntervalMs`, `activeDedupWindowMs`,
   `uploadOnCellular`) are ignored: this SDK has no motion state or cellular gating.

@@ -25,10 +25,6 @@ class Scanner:
     Supports scanning for multiple UUIDs simultaneously (e.g. Hubble FCA6
     and Tile FEED). Works with both internal BLE adapters and external USB
     dongles — pass ``adapter='hci1'`` to select a specific adapter.
-
-    Pass ``auth`` to let the server's ``scanServiceUuids`` replace
-    ``service_uuids``. The list is re-read before each scan cycle, so a new
-    server list applies at the next cycle without a restart.
     """
 
     def __init__(
