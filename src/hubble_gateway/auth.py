@@ -22,8 +22,7 @@ _TOKEN_EXPIRY_MARGIN_S = 60
 # Server config keys this SDK applies, with the inclusive range gateway-api
 # allows for them. gateway-api may also send activeUploadIntervalMs,
 # activeDedupWindowMs and uploadOnCellular; Python has no motion state or
-# cellular gating, so those are dropped. scanServiceUuids is handled apart
-# because it is a list.
+# cellular gating, so those are dropped.
 SERVER_CONFIG_RANGES: dict[str, tuple[int, int]] = {
     "uploadIntervalMs": (60_000, 3_600_000),
     "uploadBatchSize": (1, 500),
@@ -34,12 +33,12 @@ MAX_SCAN_SERVICE_UUIDS = 16
 
 
 def _sanitize_scan_service_uuids(value: Any) -> list[str] | None:
-    """Normalize a server scan list to uppercase 128-bit UUIDs, FCA6 first.
+    """Normalize a UUID list to uppercase 128-bit UUIDs, FCA6 first.
 
     Only 16-bit services are valid (short form or written out on the Bluetooth
     Base UUID), because gateway-api ingest keys packets on 16-bit service IDs.
     Other entries are dropped; FCA6 is always kept, as gateway-api does.
-    Returns None when the value is not a list, so the local setting applies.
+    Returns None when the value is not a list.
     """
     if not isinstance(value, list):
         return None
