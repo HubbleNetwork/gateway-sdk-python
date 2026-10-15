@@ -19,13 +19,13 @@ each scan cycle, so each new response takes effect without a restart.
 - Each response replaces the stored config. It does not merge into it.
 - `config: null` clears it, and the local values apply again.
 - Out-of-range values are clamped. Values of the wrong type are ignored.
-- `scanServiceUuids` replaces the scan list. Entries are 16-bit (`FCA6`) or
-  128-bit UUIDs; the SDK expands 16-bit ones to the Bluetooth Base UUID,
-  drops invalid ones and duplicates, keeps `FCA6` first, and keeps at most 16.
+- `scanServiceUuids` replaces the scan list. Only 16-bit services are valid:
+  the short form (`FCA6`) or its Bluetooth Base form
+  (`0000FCA6-0000-1000-8000-00805F9B34FB`). Custom 128-bit UUIDs are dropped,
+  because gateway-api keys packets on 16-bit service IDs. The SDK also drops
+  duplicates, keeps `FCA6` first, and keeps at most 16.
   Server default: `["FCA6", "FEED"]`.
-- Uploaded packets carry the 16-bit form (`FCA6`) as `serviceUuid`. A 128-bit
-  UUID that is not on the Bluetooth Base UUID is sent whole; gateway-api
-  currently rejects those packets.
+- Uploaded packets carry the 16-bit form (`FCA6`) as `serviceUuid`.
 - Other keys (`activeUploadIntervalMs`, `activeDedupWindowMs`,
   `uploadOnCellular`) are ignored: this SDK has no motion state or cellular gating.
 

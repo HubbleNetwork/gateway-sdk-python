@@ -27,7 +27,9 @@ def _scan(raw):
         ([], [FCA6]),
         (["180F", FCA6.lower()], [FCA6, BASE_180F]),
         ([BASE_180F.lower(), "180F"], [FCA6, BASE_180F]),
-        ([CUSTOM.lower()], [FCA6, CUSTOM]),
+        ([CUSTOM.lower()], [FCA6]),
+        (["FEED", CUSTOM], [FCA6, FEED]),
+        (["00010000-0000-1000-8000-00805F9B34FB"], [FCA6]),
         (["FEED", "nope", 7, None, "FCA", "FEED"], [FCA6, FEED]),
     ],
 )
@@ -74,27 +76,27 @@ def test_scanner_local_list_without_server_config():
     assert s.service_uuids == [FCA6.lower(), FEED.lower()]
 
 
-def test_scanner_server_list_replaces_local_and_uploads_custom_uuid():
+def test_scanner_server_list_replaces_local():
     packets = []
     s = Scanner(
         service_uuids=[FCA6, FEED],
         on_packet=packets.append,
-        auth=_auth({"scanServiceUuids": [FCA6, CUSTOM]}),
+        auth=_auth({"scanServiceUuids": [FCA6, BASE_180F]}),
     )
-    assert s.service_uuids == [FCA6.lower(), CUSTOM.lower()]
+    assert s.service_uuids == [FCA6.lower(), BASE_180F.lower()]
 
     s._detection_callback(*_adv(FEED.lower()))
     assert packets == []
 
-    s._detection_callback(*_adv(CUSTOM.lower()))
-    assert packets[0].to_gateway_packet()["serviceUuid"] == CUSTOM
+    s._detection_callback(*_adv(BASE_180F.lower()))
+    assert packets[0].to_gateway_packet()["serviceUuid"] == "180F"
 
     s._detection_callback(*_adv("fca6"))
     assert packets[1].to_gateway_packet()["serviceUuid"] == "FCA6"
 
 
-def test_custom_uuid_has_no_16bit_alias():
-    s = Scanner(auth=_auth({"scanServiceUuids": [CUSTOM]}))
+def test_local_custom_uuid_has_no_16bit_alias():
+    s = Scanner(service_uuids=[CUSTOM])
     assert s._match_service_uuid(["5678"]) is None
 
 
@@ -109,7 +111,7 @@ async def test_scanner_applies_new_list_next_cycle(monkeypatch):
 
         async def __aenter__(self):
             if len(calls) == 1:
-                auth.server_config = {"scanServiceUuids": [FCA6, CUSTOM]}
+                auth.server_config = {"scanServiceUuids": [FCA6, BASE_180F]}
             elif len(calls) == 2:
                 auth.server_config = {}
             else:
@@ -123,7 +125,7 @@ async def test_scanner_applies_new_list_next_cycle(monkeypatch):
     await s.start()
     assert calls == [
         [FCA6.lower(), FEED.lower()],
-        [FCA6.lower(), CUSTOM.lower()],
+        [FCA6.lower(), BASE_180F.lower()],
         [FCA6.lower(), FEED.lower()],
     ]
 
@@ -135,7 +137,7 @@ async def test_auth_scan_list_absent_keeps_null_clears(tmp_path):
         if request.url.path == "/api/v1/gateways":
             return httpx.Response(201, json={
                 "gatewayId": "gw-1", "deviceToken": "dt", "refreshToken": "rt",
-                "expiresInSeconds": 3600, "config": {"scanServiceUuids": ["FEED", CUSTOM]},
+                "expiresInSeconds": 3600, "config": {"scanServiceUuids": ["FEED", "180F"]},
             })
         return httpx.Response(200, json=bodies["heartbeat"])
 
@@ -143,10 +145,10 @@ async def test_auth_scan_list_absent_keeps_null_clears(tmp_path):
     auth._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     assert await auth.ensure_authenticated()
     s = Scanner(service_uuids=[FCA6, FEED], auth=auth)
-    assert auth.server_config["scanServiceUuids"] == [FCA6, FEED, CUSTOM]
+    assert auth.server_config["scanServiceUuids"] == [FCA6, FEED, BASE_180F]
 
     await auth.heartbeat()
-    assert auth.server_config["scanServiceUuids"] == [FCA6, FEED, CUSTOM]
+    assert auth.server_config["scanServiceUuids"] == [FCA6, FEED, BASE_180F]
 
     bodies["heartbeat"] = {"config": None}
     await auth.heartbeat()

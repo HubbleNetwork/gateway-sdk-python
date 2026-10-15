@@ -13,7 +13,7 @@ import structlog
 
 from hubble_gateway import __version__
 from hubble_gateway.config import HUBBLE_SERVICE_UUID
-from hubble_gateway.models import normalize_service_uuid
+from hubble_gateway.models import is_bluetooth_base_uuid, normalize_service_uuid
 
 logger = structlog.get_logger(__name__)
 
@@ -36,7 +36,9 @@ MAX_SCAN_SERVICE_UUIDS = 16
 def _sanitize_scan_service_uuids(value: Any) -> list[str] | None:
     """Normalize a server scan list to uppercase 128-bit UUIDs, FCA6 first.
 
-    Invalid entries are dropped; FCA6 is always kept, as gateway-api does.
+    Only 16-bit services are valid (short form or written out on the Bluetooth
+    Base UUID), because gateway-api ingest keys packets on 16-bit service IDs.
+    Other entries are dropped; FCA6 is always kept, as gateway-api does.
     Returns None when the value is not a list, so the local setting applies.
     """
     if not isinstance(value, list):
@@ -44,7 +46,7 @@ def _sanitize_scan_service_uuids(value: Any) -> list[str] | None:
     result = [HUBBLE_SERVICE_UUID]
     for item in value:
         u = normalize_service_uuid(item) if isinstance(item, str) else None
-        if u is not None and u not in result:
+        if u is not None and is_bluetooth_base_uuid(u) and u not in result:
             result.append(u)
     return result[:MAX_SCAN_SERVICE_UUIDS]
 
