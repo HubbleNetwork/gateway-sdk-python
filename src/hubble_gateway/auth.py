@@ -2,6 +2,7 @@
 
 import json
 import locale
+import math
 import platform
 import time
 from pathlib import Path
@@ -11,10 +12,65 @@ import httpx
 import structlog
 
 from hubble_gateway import __version__
+from hubble_gateway.config import HUBBLE_SERVICE_UUID
+from hubble_gateway.models import is_bluetooth_base_uuid, normalize_service_uuid
 
 logger = structlog.get_logger(__name__)
 
 _TOKEN_EXPIRY_MARGIN_S = 60
+
+# Server config keys this SDK applies, with the inclusive range gateway-api
+# allows for them. gateway-api may also send activeUploadIntervalMs,
+# activeDedupWindowMs and uploadOnCellular; Python has no motion state or
+# cellular gating, so those are dropped. scanServiceUuids is handled apart
+# because it is a list.
+SERVER_CONFIG_RANGES: dict[str, tuple[int, int]] = {
+    "uploadIntervalMs": (60_000, 3_600_000),
+    "uploadBatchSize": (1, 500),
+    "dedupWindowMs": (5_000, 3_600_000),
+}
+
+MAX_SCAN_SERVICE_UUIDS = 16
+
+
+def _sanitize_scan_service_uuids(value: Any) -> list[str] | None:
+    """Normalize a server scan list to uppercase 128-bit UUIDs, FCA6 first.
+
+    Only 16-bit services are valid (short form or written out on the Bluetooth
+    Base UUID), because gateway-api ingest keys packets on 16-bit service IDs.
+    Other entries are dropped; FCA6 is always kept, as gateway-api does.
+    Returns None when the value is not a list, so the local setting applies.
+    """
+    if not isinstance(value, list):
+        return None
+    result = [HUBBLE_SERVICE_UUID]
+    for item in value:
+        u = normalize_service_uuid(item) if isinstance(item, str) else None
+        if u is not None and is_bluetooth_base_uuid(u) and u not in result:
+            result.append(u)
+    return result[:MAX_SCAN_SERVICE_UUIDS]
+
+
+def sanitize_server_config(config: Any) -> dict[str, Any]:
+    """Keep the keys this SDK uses, clamped to their ranges.
+
+    Values of the wrong type (null, strings, bools, NaN) are dropped, so the
+    local setting applies for that key.
+    """
+    if not isinstance(config, dict):
+        return {}
+    result: dict[str, Any] = {}
+    uuids = _sanitize_scan_service_uuids(config.get("scanServiceUuids"))
+    if uuids is not None:
+        result["scanServiceUuids"] = uuids
+    for key, (low, high) in SERVER_CONFIG_RANGES.items():
+        value = config.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if isinstance(value, float) and not math.isfinite(value):
+            continue
+        result[key] = min(max(int(value), low), high)
+    return result
 
 
 def _device_id() -> str:
@@ -188,6 +244,7 @@ class GatewayAuth:
         self._device_token = dt
         self._refresh_token = rt
         self._expires_at_ms = int(time.time() * 1000) + exp * 1000
+        self._apply_server_config(data)
         self._persist_tokens()
         logger.info("Token refreshed", expires_in_s=exp)
         return True
@@ -201,6 +258,7 @@ class GatewayAuth:
         )
         if resp.status_code == 200:
             self._apply_server_config(resp.json())
+            self._persist_tokens()
 
     async def _request(
         self, method: str, path: str, json_body: dict[str, Any] | None = None,
@@ -216,11 +274,13 @@ class GatewayAuth:
             method, f"{self._base_url}{path}", json=json_body, headers=headers,
         )
 
-    def _apply_server_config(self, data: dict[str, Any]) -> None:
-        config = data.get("config") or {}
-        for key in ("uploadIntervalMs", "uploadBatchSize", "scanIntervalMs", "featureFlags"):
-            if key in config:
-                self.server_config[key] = config[key]
+    def _apply_server_config(self, data: Any) -> None:
+        # The server sends the full effective config each time, so replace
+        # rather than merge: a removed override must not stick. A response
+        # without a "config" key says nothing and keeps the current config.
+        if not isinstance(data, dict) or "config" not in data:
+            return
+        self.server_config = sanitize_server_config(data["config"])
 
     def _persist_tokens(self) -> None:
         self._token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -242,7 +302,7 @@ class GatewayAuth:
             self._device_token = data.get("deviceToken")
             self._refresh_token = data.get("refreshToken")
             self._expires_at_ms = data.get("expiresAtMs", 0)
-            self.server_config = data.get("serverConfig", {})
+            self.server_config = sanitize_server_config(data.get("serverConfig"))
             logger.info("Loaded persisted auth", gateway_id=self._gateway_id)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to load persisted auth", error=str(exc))

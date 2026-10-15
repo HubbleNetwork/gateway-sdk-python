@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 import structlog
 from bleak import BleakScanner
@@ -10,7 +11,10 @@ from bleak.backends.device import BLEDevice
 from bleak.backends.scanner import AdvertisementData
 
 from hubble_gateway.config import DEFAULT_SERVICE_UUIDS
-from hubble_gateway.models import BLEPacket, uuid_to_16bit
+from hubble_gateway.models import BLEPacket, is_bluetooth_base_uuid, uuid_to_16bit
+
+if TYPE_CHECKING:
+    from hubble_gateway.auth import GatewayAuth
 
 logger = structlog.get_logger(__name__)
 
@@ -21,6 +25,10 @@ class Scanner:
     Supports scanning for multiple UUIDs simultaneously (e.g. Hubble FCA6
     and Tile FEED). Works with both internal BLE adapters and external USB
     dongles — pass ``adapter='hci1'`` to select a specific adapter.
+
+    Pass ``auth`` to let the server's ``scanServiceUuids`` replace
+    ``service_uuids``. The list is re-read before each scan cycle, so a new
+    server list applies at the next cycle without a restart.
     """
 
     def __init__(
@@ -29,8 +37,12 @@ class Scanner:
         scan_duration: float = 5.0,
         on_packet: Callable[[BLEPacket], None] | None = None,
         adapter: str | None = None,
+        auth: "GatewayAuth | None" = None,
     ) -> None:
-        self._service_uuids = [u.lower() for u in (service_uuids or DEFAULT_SERVICE_UUIDS)]
+        self._local_service_uuids = list(service_uuids or DEFAULT_SERVICE_UUIDS)
+        self._auth = auth
+        self._service_uuids: list[str] = []
+        self._uuid_variants: dict[str, str] = {}
         self._scan_duration = scan_duration
         self._on_packet = on_packet
         self._adapter = adapter or None
@@ -39,14 +51,35 @@ class Scanner:
         self._seen_devices: set[str] = set()
         self._devices_this_scan: set[str] = set()
         self._total_packets = 0
+        self._refresh_service_uuids()
 
-        self._uuid_variants: dict[str, str] = {}
-        for full_uuid in self._service_uuids:
-            short = full_uuid[4:8]
-            canonical = f"0000{short}-0000-1000-8000-00805f9b34fb"
-            self._uuid_variants[full_uuid] = full_uuid
-            self._uuid_variants[short] = full_uuid
-            self._uuid_variants[canonical] = full_uuid
+    @property
+    def service_uuids(self) -> list[str]:
+        """The UUIDs the current scan cycle filters on (lowercase 128-bit)."""
+        return list(self._service_uuids)
+
+    def _effective_service_uuids(self) -> list[str]:
+        if self._auth is not None:
+            server = self._auth.server_config.get("scanServiceUuids")
+            if server:
+                return server
+        return self._local_service_uuids
+
+    def _refresh_service_uuids(self) -> bool:
+        """Adopt the effective UUID list; return True if it changed."""
+        uuids = [u.lower() for u in self._effective_service_uuids()]
+        if uuids == self._service_uuids:
+            return False
+        variants: dict[str, str] = {}
+        for full_uuid in uuids:
+            variants[full_uuid] = full_uuid
+            # Only a Bluetooth Base UUID has a 16-bit alias; slicing any other
+            # UUID would match an unrelated 16-bit service.
+            if is_bluetooth_base_uuid(full_uuid):
+                variants[full_uuid[4:8]] = full_uuid
+        self._service_uuids = uuids
+        self._uuid_variants = variants
+        return True
 
     def _match_service_uuid(self, advertised_uuids: list[str]) -> str | None:
         for adv_uuid in advertised_uuids:
@@ -103,17 +136,21 @@ class Scanner:
             adapter=self._adapter or "default",
         )
 
-        scanner_kwargs: dict = {
-            "detection_callback": self._detection_callback,
-            "service_uuids": self._service_uuids,
-        }
-        if self._adapter:
-            scanner_kwargs["adapter"] = self._adapter
-
         while self._running:
             if self._paused:
                 await asyncio.sleep(0.5)
                 continue
+            if self._refresh_service_uuids():
+                logger.info(
+                    "Scan UUIDs changed",
+                    service_uuids=[uuid_to_16bit(u) for u in self._service_uuids],
+                )
+            scanner_kwargs: dict = {
+                "detection_callback": self._detection_callback,
+                "service_uuids": self._service_uuids,
+            }
+            if self._adapter:
+                scanner_kwargs["adapter"] = self._adapter
             try:
                 self._devices_this_scan.clear()
                 async with BleakScanner(**scanner_kwargs) as _scanner:
