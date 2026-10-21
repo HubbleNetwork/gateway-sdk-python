@@ -135,10 +135,16 @@ async def test_auth_scan_list_absent_keeps_null_clears(tmp_path):
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/v1/gateways":
-            return httpx.Response(201, json={
-                "gatewayId": "gw-1", "deviceToken": "dt", "refreshToken": "rt",
-                "expiresInSeconds": 3600, "config": {"scanServiceUuids": ["FEED", "180F"]},
-            })
+            return httpx.Response(
+                201,
+                json={
+                    "gatewayId": "gw-1",
+                    "deviceToken": "dt",
+                    "refreshToken": "rt",
+                    "expiresInSeconds": 3600,
+                    "config": {"scanServiceUuids": ["FEED", "180F"]},
+                },
+            )
         return httpx.Response(200, json=bodies["heartbeat"])
 
     auth = GatewayAuth("k", "https://gw.test", token_path=str(tmp_path / "a.json"))

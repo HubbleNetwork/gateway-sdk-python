@@ -96,7 +96,9 @@ class GatewaySender:
         self._stats_total += 1
         self._stats_devices.add(packet.device_address)
         key: _DedupKey = (
-            packet.device_address, packet.service_uuid_16bit, packet.service_data_hex,
+            packet.device_address,
+            packet.service_uuid_16bit,
+            packet.service_data_hex,
         )
         now_ms = int(packet.timestamp.timestamp() * 1000)
         window_ms = self.dedup_window_s * 1000
@@ -206,7 +208,8 @@ class GatewaySender:
         packets_json = []
         for entry in entries:
             pkt = entry.packet.to_gateway_packet(
-                location=location, sighting_count=entry.sighting_count,
+                location=location,
+                sighting_count=entry.sighting_count,
             )
             pkt["rssi"] = entry.strongest_rssi
             packets_json.append(pkt)
@@ -219,7 +222,9 @@ class GatewaySender:
 
         try:
             resp = await self._auth.authenticated_request(
-                "POST", f"/api/v1/gateways/{gateway_id}/packets", json_body=body,
+                "POST",
+                f"/api/v1/gateways/{gateway_id}/packets",
+                json_body=body,
             )
             if resp.status_code in (200, 201, 202):
                 self._stats_sends += 1
@@ -247,7 +252,9 @@ class GatewaySender:
         }
         try:
             await self._auth.authenticated_request(
-                "POST", f"/api/v1/gateways/{gateway_id}/locations", json_body=body,
+                "POST",
+                f"/api/v1/gateways/{gateway_id}/locations",
+                json_body=body,
             )
         except Exception as e:
             logger.warning("Location upload failed", error=str(e))

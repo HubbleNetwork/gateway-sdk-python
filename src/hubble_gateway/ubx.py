@@ -80,15 +80,28 @@ def _parse_nav_pvt_payload(payload: bytes) -> UBXNavPVT:
     pdop_raw = struct.unpack_from("<H", payload, 76)[0]
 
     return UBXNavPVT(
-        itow_ms=itow_ms, year=year, month=month, day=day,
-        hour=hour, minute=minute, second=second, valid=valid,
-        valid_date=bool(valid & 0x01), valid_time=bool(valid & 0x02),
-        fix_type=fix_type, flags=flags, gnss_fix_ok=bool(flags & 0x01),
+        itow_ms=itow_ms,
+        year=year,
+        month=month,
+        day=day,
+        hour=hour,
+        minute=minute,
+        second=second,
+        valid=valid,
+        valid_date=bool(valid & 0x01),
+        valid_time=bool(valid & 0x02),
+        fix_type=fix_type,
+        flags=flags,
+        gnss_fix_ok=bool(flags & 0x01),
         num_sv=num_sv,
-        lat=lat_i / 1e7, lon=lon_i / 1e7,
-        height_ellipsoid_m=height_mm / 1000.0, alt_msl_m=hmsl_mm / 1000.0,
-        hacc_m=hacc_mm / 1000.0, vacc_m=vacc_mm / 1000.0,
-        ground_speed_ms=g_speed_mm_s / 1000.0, heading_deg=head_mot / 1e5,
+        lat=lat_i / 1e7,
+        lon=lon_i / 1e7,
+        height_ellipsoid_m=height_mm / 1000.0,
+        alt_msl_m=hmsl_mm / 1000.0,
+        hacc_m=hacc_mm / 1000.0,
+        vacc_m=vacc_mm / 1000.0,
+        ground_speed_ms=g_speed_mm_s / 1000.0,
+        heading_deg=head_mot / 1e5,
         pdop=pdop_raw / 100.0,
     )
 
@@ -107,7 +120,8 @@ class UBXReader:
         import serial_asyncio
 
         self._reader, self._writer = await serial_asyncio.open_serial_connection(
-            url=self._port, baudrate=self._baud_rate,
+            url=self._port,
+            baudrate=self._baud_rate,
         )
         self._buf.clear()
         logger.info("UBX reader connected", port=self._port, baud_rate=self._baud_rate)
@@ -117,7 +131,7 @@ class UBXReader:
         """Enable UBX NAV-PVT output on UART (persisted to flash)."""
         if self._writer is None:
             return
-        kv = struct.pack("<IB", 0x10750001, 1)   # CFG-UART2OUTPROT-UBX = true
+        kv = struct.pack("<IB", 0x10750001, 1)  # CFG-UART2OUTPROT-UBX = true
         kv += struct.pack("<IB", 0x20910008, 1)  # CFG-MSGOUT-UBX_NAV_PVT_UART2 = 1
         payload = struct.pack("<BBH", 0x00, 0x07, 0x0000) + kv
         frame = _ubx_frame(0x06, 0x8A, payload)
@@ -185,7 +199,7 @@ class UBXReader:
                 if remaining <= 0:
                     return None
 
-            body = bytes(self._buf[2:6 + payload_len])
+            body = bytes(self._buf[2 : 6 + payload_len])
             ck_a, ck_b = self._buf[6 + payload_len], self._buf[6 + payload_len + 1]
             exp_a, exp_b = _ubx_checksum(body)
 
@@ -211,9 +225,7 @@ class UBXReader:
         if self._reader is None:
             return None
         try:
-            return await asyncio.wait_for(
-                self._reader.read(max(max_bytes, 1)), timeout=timeout_s
-            )
+            return await asyncio.wait_for(self._reader.read(max(max_bytes, 1)), timeout=timeout_s)
         except asyncio.TimeoutError:
             return None
 
