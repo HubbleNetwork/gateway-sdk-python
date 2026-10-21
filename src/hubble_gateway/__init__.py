@@ -5,7 +5,7 @@ Import the components you need to build a gateway:
     from hubble_gateway import Scanner, GatewaySender, GatewayAuth, Location, BLEPacket
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from hubble_gateway.auth import GatewayAuth
 from hubble_gateway.config import (
