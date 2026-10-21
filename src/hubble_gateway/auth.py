@@ -202,7 +202,9 @@ class GatewayAuth:
         payload = _build_registration_payload()
         logger.info("Registering gateway", base_url=self._base_url)
         resp = await self._request(
-            "PUT", "/api/v1/gateways", json_body=payload,
+            "PUT",
+            "/api/v1/gateways",
+            json_body=payload,
             extra_headers={"X-Sdk-Key": self._sdk_key},
         )
         if resp.status_code not in (200, 201):
@@ -228,7 +230,8 @@ class GatewayAuth:
     async def _refresh(self) -> bool:
         logger.info("Refreshing device token")
         resp = await self._request(
-            "POST", "/api/v1/auth/refresh",
+            "POST",
+            "/api/v1/auth/refresh",
             json_body={"refreshToken": self._refresh_token},
         )
         if resp.status_code != 200:
@@ -253,15 +256,22 @@ class GatewayAuth:
             return
         payload = _build_registration_payload()
         resp = await self.authenticated_request(
-            "PUT", f"/api/v1/gateways/{self._gateway_id}", json_body=payload,
+            "PUT",
+            f"/api/v1/gateways/{self._gateway_id}",
+            json_body=payload,
         )
         if resp.status_code == 200:
             self._apply_server_config(resp.json())
             self._persist_tokens()
 
     async def _request(
-        self, method: str, path: str, json_body: dict[str, Any] | None = None,
-        *, authenticated: bool = False, extra_headers: dict[str, str] | None = None,
+        self,
+        method: str,
+        path: str,
+        json_body: dict[str, Any] | None = None,
+        *,
+        authenticated: bool = False,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         assert self._client is not None, "call start() first"
         headers: dict[str, str] = {}
@@ -270,7 +280,10 @@ class GatewayAuth:
         if extra_headers:
             headers.update(extra_headers)
         return await self._client.request(
-            method, f"{self._base_url}{path}", json=json_body, headers=headers,
+            method,
+            f"{self._base_url}{path}",
+            json=json_body,
+            headers=headers,
         )
 
     def _apply_server_config(self, data: Any) -> None:
@@ -283,13 +296,17 @@ class GatewayAuth:
 
     def _persist_tokens(self) -> None:
         self._token_path.parent.mkdir(parents=True, exist_ok=True)
-        self._token_path.write_text(json.dumps({
-            "gatewayId": self._gateway_id,
-            "deviceToken": self._device_token,
-            "refreshToken": self._refresh_token,
-            "expiresAtMs": self._expires_at_ms,
-            "serverConfig": self.server_config,
-        }))
+        self._token_path.write_text(
+            json.dumps(
+                {
+                    "gatewayId": self._gateway_id,
+                    "deviceToken": self._device_token,
+                    "refreshToken": self._refresh_token,
+                    "expiresAtMs": self._expires_at_ms,
+                    "serverConfig": self.server_config,
+                }
+            )
+        )
         self._token_path.chmod(0o600)
 
     def _load_persisted_tokens(self) -> None:

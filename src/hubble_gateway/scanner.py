@@ -84,9 +84,7 @@ class Scanner:
                 return self._uuid_variants[key]
         return None
 
-    def _detection_callback(
-        self, device: BLEDevice, advertisement_data: AdvertisementData
-    ) -> None:
+    def _detection_callback(self, device: BLEDevice, advertisement_data: AdvertisementData) -> None:
         adv_uuids = [str(u).lower() for u in advertisement_data.service_uuids or []]
         matched_uuid = self._match_service_uuid(adv_uuids)
         if matched_uuid is None:

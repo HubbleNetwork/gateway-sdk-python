@@ -166,10 +166,18 @@ async def test_heartbeat_persists_config(auth, server, tmp_path):
 
 def test_persisted_stale_keys_dropped(tmp_path):
     path = tmp_path / "auth.json"
-    path.write_text(json.dumps({
-        "gatewayId": "gw-1",
-        "serverConfig": {"uploadIntervalMs": 1_000, "scanIntervalMs": 5, "featureFlags": {}},
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "gatewayId": "gw-1",
+                "serverConfig": {
+                    "uploadIntervalMs": 1_000,
+                    "scanIntervalMs": 5,
+                    "featureFlags": {},
+                },
+            }
+        )
+    )
     a = GatewayAuth("sdk-key", "https://gw.test", token_path=str(path))
     assert a.server_config == {"uploadIntervalMs": 60_000}
 
@@ -260,8 +268,11 @@ async def test_dedup_keys_capped(auth, monkeypatch):
     for addr in ("A1", "A2", "A3", "A4", "A5"):
         sender.add_packet(_packet(addr, t0))
     assert sender.stats["dedup_keys"] == 3
-    assert list(sender._window_start_ms) == [("A3", "FCA6", "01"), ("A4", "FCA6", "01"),
-                                             ("A5", "FCA6", "01")]
+    assert list(sender._window_start_ms) == [
+        ("A3", "FCA6", "01"),
+        ("A4", "FCA6", "01"),
+        ("A5", "FCA6", "01"),
+    ]
 
 
 def test_default_upload_interval_is_60s(auth, monkeypatch):

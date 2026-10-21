@@ -10,9 +10,7 @@ from pydantic import BaseModel, Field
 BLUETOOTH_BASE_UUID_SUFFIX = "-0000-1000-8000-00805F9B34FB"
 
 _UUID16_PATTERN = re.compile(r"^[0-9A-F]{4}$")
-_UUID128_PATTERN = re.compile(
-    r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$"
-)
+_UUID128_PATTERN = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$")
 
 
 def normalize_service_uuid(value: str) -> str | None:
@@ -130,9 +128,7 @@ class BLEPacket(BaseModel):
     ) -> dict[str, Any]:
         """Convert to gateway-api packet format."""
         payload_bytes = self.get_matched_service_data()
-        service_data_b64 = (
-            base64.b64encode(payload_bytes).decode() if payload_bytes else None
-        )
+        service_data_b64 = base64.b64encode(payload_bytes).decode() if payload_bytes else None
         ts_ms = int(self.timestamp.timestamp() * 1000)
 
         packet: dict[str, Any] = {

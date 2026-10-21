@@ -150,7 +150,8 @@ class SerialGPSLocationProvider(LocationProvider):
         import serial_asyncio
 
         self._reader, self._writer = await serial_asyncio.open_serial_connection(
-            url=self._port, baudrate=self._baud_rate,
+            url=self._port,
+            baudrate=self._baud_rate,
         )
         self._running = True
         self._location.gps_state = "searching"
@@ -331,6 +332,7 @@ class GPSDLocationProvider(LocationProvider):
     async def start(self) -> None:
         try:
             import gpsd
+
             gpsd.connect()
             self._running = True
             logger.info("GPSD location provider started")
