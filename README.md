@@ -24,6 +24,18 @@ without a restart.
 
 The local default upload interval is 60 s, the same as the server's floor.
 
+## Scanning
+
+`Scanner` always scans for the Hubble service `FCA6`, plus any configured
+payload services.
+
+- One advertisement gives at most one uploaded sighting: the first service, in
+  priority order (`FCA6` first), that has non-empty service data.
+- `stats["multi_payload_advertisements"]` counts advertisements that carried
+  service data for more than one payload service.
+- `Scanner(service_uuids=[...])` adds scan-only services. Matching
+  advertisements reach the `on_advertisement` callback and are not uploaded.
+
 ## Deduplication
 
 The dedup key is `(device address, 16-bit service UUID, service data hex)`.

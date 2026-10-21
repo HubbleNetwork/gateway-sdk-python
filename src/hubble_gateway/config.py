@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 HUBBLE_SERVICE_UUID = "0000FCA6-0000-1000-8000-00805F9B34FB"
 TILE_SERVICE_UUID = "0000FEED-0000-1000-8000-00805F9B34FB"
-DEFAULT_SERVICE_UUIDS = [HUBBLE_SERVICE_UUID, TILE_SERVICE_UUID]
+# FCA6 is always scanned. Other payload services come from the
+# payloadServiceUuids config key, so the compiled-in default is FCA6 only.
+DEFAULT_SERVICE_UUIDS = [HUBBLE_SERVICE_UUID]
 
 GATEWAY_API_BASE_URL = "https://gw-api.hubble.com"
 
@@ -38,8 +40,11 @@ class Settings(BaseSettings):
 
     # BLE scanning
     service_uuids: list[str] = Field(
-        default=DEFAULT_SERVICE_UUIDS,
-        description="BLE service UUIDs to scan for",
+        default_factory=list,
+        description=(
+            "Extra BLE service UUIDs to scan for. Scan-only: they reach "
+            "on_advertisement listeners and are not uploaded."
+        ),
     )
     scan_duration_seconds: float = Field(
         default=5.0,

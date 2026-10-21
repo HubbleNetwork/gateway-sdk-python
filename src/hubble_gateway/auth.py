@@ -13,7 +13,7 @@ import structlog
 
 from hubble_gateway import __version__
 from hubble_gateway.config import HUBBLE_SERVICE_UUID
-from hubble_gateway.models import is_bluetooth_base_uuid, normalize_service_uuid
+from hubble_gateway.models import is_bluetooth_base_uuid, normalize_service_uuid, uuid_to_16bit
 
 logger = structlog.get_logger(__name__)
 
@@ -29,25 +29,29 @@ SERVER_CONFIG_RANGES: dict[str, tuple[int, int]] = {
     "dedupWindowMs": (5_000, 3_600_000),
 }
 
-MAX_SCAN_SERVICE_UUIDS = 16
+MAX_PAYLOAD_SERVICE_UUIDS = 8
+_HUBBLE_SERVICE_16 = uuid_to_16bit(HUBBLE_SERVICE_UUID)
 
 
-def _sanitize_scan_service_uuids(value: Any) -> list[str] | None:
-    """Normalize a UUID list to uppercase 128-bit UUIDs, FCA6 first.
+def _sanitize_payload_service_uuids(value: Any) -> list[str] | None:
+    """Normalize a payloadServiceUuids list to ordered 16-bit forms (``FEED``).
 
-    Only 16-bit services are valid (short form or written out on the Bluetooth
-    Base UUID), because gateway-api ingest keys packets on 16-bit service IDs.
-    Other entries are dropped; FCA6 is always kept, as gateway-api does.
-    Returns None when the value is not a list.
+    Accepts the short form or the full form on the Bluetooth Base UUID, in any
+    case. Drops invalid entries and FCA6 (always scanned), dedupes, and keeps
+    the first MAX_PAYLOAD_SERVICE_UUIDS. Returns None when the value is not a
+    list.
     """
     if not isinstance(value, list):
         return None
-    result = [HUBBLE_SERVICE_UUID]
+    result: list[str] = []
     for item in value:
         u = normalize_service_uuid(item) if isinstance(item, str) else None
-        if u is not None and is_bluetooth_base_uuid(u) and u not in result:
-            result.append(u)
-    return result[:MAX_SCAN_SERVICE_UUIDS]
+        if u is None or not is_bluetooth_base_uuid(u):
+            continue
+        short = uuid_to_16bit(u)
+        if short != _HUBBLE_SERVICE_16 and short not in result:
+            result.append(short)
+    return result[:MAX_PAYLOAD_SERVICE_UUIDS]
 
 
 def sanitize_server_config(config: Any) -> dict[str, Any]:
@@ -59,9 +63,10 @@ def sanitize_server_config(config: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         return {}
     result: dict[str, Any] = {}
-    uuids = _sanitize_scan_service_uuids(config.get("scanServiceUuids"))
+    # The legacy scanServiceUuids key is ignored.
+    uuids = _sanitize_payload_service_uuids(config.get("payloadServiceUuids"))
     if uuids is not None:
-        result["scanServiceUuids"] = uuids
+        result["payloadServiceUuids"] = uuids
     for key, (low, high) in SERVER_CONFIG_RANGES.items():
         value = config.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
