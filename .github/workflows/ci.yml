@@ -27,10 +27,11 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
-      # `ruff format --check` is not enforced yet: the existing sources are not
-      # format-clean, and reformatting them belongs in its own PR.
-      - name: Ruff
+      - name: Ruff check
         run: ruff check .
+
+      - name: Ruff format
+        run: ruff format --check .
 
   test:
     runs-on: ubuntu-latest
@@ -50,16 +51,5 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
 
-      # pytest exits 5 when it collects no tests. main has no tests yet, so
-      # treat 5 as success until the first test file lands; every other
-      # non-zero code still fails the job.
       - name: Pytest
-        run: |
-          set +e
-          pytest -q
-          code=$?
-          if [ "$code" -eq 5 ]; then
-            echo "::notice::pytest collected no tests (exit 5); treating as success."
-            exit 0
-          fi
-          exit "$code"
+        run: pytest -q
