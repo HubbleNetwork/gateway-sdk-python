@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # Required
     sdk_key: str = Field(
         default="",
-        description="SDK key from Hubble dashboard (required)",
+        description="Gateway Group ID from the Hubble dashboard (required)",
     )
 
     # API
