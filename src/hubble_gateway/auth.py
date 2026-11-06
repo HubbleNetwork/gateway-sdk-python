@@ -1,4 +1,4 @@
-"""Gateway API authentication: SDK key registration and token lifecycle."""
+"""Gateway API authentication: Gateway Group ID registration and token lifecycle."""
 
 import json
 import locale
